@@ -33,5 +33,5 @@ class CMathsTestsNoRun(ExhaleTestCase):
         self.assertEqual(containmentFolder, './api')
 
         # check that nothing has been generated
-        api_dir = os.path.join(self.testroot, containmentFolder)
+        api_dir = os.path.join(self.app.srcdir, containmentFolder)
         self.assertFalse(os.path.exists(api_dir))

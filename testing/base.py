@@ -19,6 +19,7 @@ import unittest
 import pytest
 
 from six import with_metaclass
+from sphinx.testing.path import path
 
 import exhale
 
@@ -94,10 +95,6 @@ class ExhaleTestCaseMetaclass(type):
             # otherwise we need a ``test_project`` attribute
             raise RuntimeError('ExhaleTestCase subclasses must define a "test_project" attribute')
 
-        # Run all test projects local to the project folder
-        testroot = os.path.join(TEST_PROJECTS_ROOT, test_project, "docs")
-        attrs["testroot"] = testroot
-
         # looking for test methods ("test_*")
         has_tests = False
         for n, attr in attrs.items():
@@ -107,9 +104,9 @@ class ExhaleTestCaseMetaclass(type):
 
         # if there are tests, we set the app attribute using the ``sphinx.testing.fixtures.app`` fixture
         if has_tests:
-            ############################################################################
-            # Make the sphinx test application available as `self.app`.                #
-            ############################################################################
+            #################################################################################
+            # Make the sphinx test application available as `self.app`.                     #
+            #################################################################################
             def _set_app(self, app):
                 # before the test
                 self.app = app
@@ -132,6 +129,57 @@ class ExhaleTestCaseMetaclass(type):
                 if os.path.isdir(doxy_dir):
                     shutil.rmtree(doxy_dir)
 
+            #################################################################################
+            # Automatically create docs_Class_test/{conf.py,index.rst} for the test method. #
+            #################################################################################
+            def _rootdir(self, app_params):
+                # Create the test project's 'docs' dir with a conf.py and index.rst.
+
+                # the root directory name is generated from the test name
+                testroot = os.path.join(TEST_PROJECTS_ROOT, self.test_project, "docs_%s_%s" % (
+                    self.__class__.__name__,
+                    self._testMethodName
+                ))
+                if os.path.isdir(testroot):
+                    shutil.rmtree(testroot)
+                os.makedirs(testroot)
+
+                # set the 'testroot' kwarg so that sphinx knows about it
+                app_params.kwargs['srcdir'] = path(testroot)
+
+                # Sphinx demands a `conf.py` is present
+                with open(os.path.join(testroot, "conf.py"), "w") as conf_py:
+                    conf_py.write(textwrap.dedent('''\
+                        # -*- coding: utf-8 -*-
+                        extensions = ["breathe", "exhale"]
+                        master_doc = "index.rst"
+                    '''))
+
+                # If a given test case needs to run app.build(), make sure index.rst
+                # is available as well
+                with open(os.path.join(testroot, "index.rst"), "w") as index_rst:
+                    index_rst.write(textwrap.dedent('''
+                        Exhale Test Case
+                        ================
+
+                        .. toctree::
+                           :maxdepth: 2
+
+                           {containmentFolder}/{rootFileName}
+                    ''').format(
+                        # containmentFolder and rootFileName are always in exhale_args
+                        **app_params.kwargs['confoverrides']['exhale_args'])
+                    )
+
+                # run the test in testroot
+                yield testroot
+
+                # perform cleanup by deleting the docs dir
+                if os.path.isdir(testroot):
+                    shutil.rmtree(testroot)
+
+            # Create the class-level fixture for creating / deleting the docs/ dir
+            attrs['_rootdir'] = pytest.fixture(autouse=True)(_rootdir)
             attrs['_set_app'] = pytest.fixture(autouse=True)(_set_app)
 
         # applying the default configuration override, which is overridden using the @confoverride decorator
